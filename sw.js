@@ -1,5 +1,5 @@
 // Service Worker: App-Dateien offline verfügbar halten. Daten liegen in IndexedDB, nicht hier.
-const CACHE = 'tonies-sammler-v1';
+const CACHE = 'tonies-sammler-v2';
 const SHELL = ['./', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png'];
 
 self.addEventListener('install', e => {

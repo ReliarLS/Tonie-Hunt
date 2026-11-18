@@ -14,7 +14,7 @@ const TABS = [
   {id: 'bald', label: 'Bald Raritäten'},
 ];
 const STATUS = {aktuell: 'Aktuell', letzte_chance: 'Bald Rarität', raritaet: 'Rarität'};
-const QUELLE = {shop: 'Tonies-Shop', support: 'Liste „nicht mehr verfügbar“', manuell: 'Selbst angelegt'};
+const QUELLE = {shop: 'Tonies-Shop', support: 'Liste „nicht mehr verfügbar“', manuell: 'Selbst angelegt', extern: 'Zusatzquelle (bitte prüfen)'};
 const ACCENTS = [['#1f7a6b', 'Petrol'], ['#2f6fdd', 'Blau'], ['#e0731d', 'Orange'], ['#d6457a', 'Rosa'], ['#7a4fd1', 'Violett'], ['#3f8f3a', 'Grün']];
 const BGS = [['#f6f4ef', 'Hell'], ['#fbf1de', 'Creme'], ['#e8f3ee', 'Mint'], ['#e8f0f8', 'Himmel'], ['#171b1e', 'Dunkel'], ['#000000', 'Schwarz']];
 
@@ -49,7 +49,7 @@ const DB = {
 };
 
 /* ---------- Zustand ---------- */
-const S = {tonies: [], byId: new Map(), besitz: new Set(), tab: 'alle', group: 'none', art: '', q: '', closed: new Set(), urls: new Map()};
+const S = {tonies: [], byId: new Map(), besitz: new Set(), tab: 'alle', group: 'none', art: '', q: '', closed: new Set(), urls: new Map(), alias: new Map()};
 const settings = {accent: ACCENTS[0][0], bg: BGS[0][0]};
 const load = (k, d) => { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } };
 const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* ohne Speicher weiterlaufen */ } };
@@ -122,7 +122,7 @@ function renderArtFilter() {
 function cardHtml(t) {
   const has = S.besitz.has(t.id);
   const pill = t.status === 'raritaet' ? '<span class="pill">Rarität</span>' : t.status === 'letzte_chance' ? '<span class="pill bald">Bald Rarität</span>' : '';
-  const flag = t.markierung ? `<span class="flag ${t.markierung === 'pruefen' ? 'pruefen' : ''}">${{neu: 'Neu', status: 'Status neu', pruefen: 'Prüfen'}[t.markierung]}</span>` : '';
+  const flag = t.markierung ? `<span class="flag ${t.markierung === 'pruefen' ? 'pruefen' : ''}">${{neu: 'Neu', status: 'Status neu', pruefen: 'Prüfen', geaendert: 'Geändert'}[t.markierung]}</span>` : '';
   const cap = t.serie ? `<b>${esc(t.serie)}</b> - ${esc(t.titel)}` : `<b>${esc(t.titel)}</b>`;
   return `<div class="card ${has ? 'has' : ''}" data-id="${esc(t.id)}" role="button" tabindex="0">` +
     `<div class="pic"><img loading="lazy" decoding="async" alt="" src="${imgSrc(t)}">${pill}${flag}` +
@@ -193,23 +193,40 @@ function hideSide() { $('#side').hidden = true; $('#scrim').hidden = true; }
 function closeSide() { closeOverlay('side'); }
 
 /* ---------- Detailblatt ---------- */
+function eur(v) { return v != null && v !== '' ? `${Number(v).toFixed(2).replace('.', ',')} €` : null; }
 function openSheet(id, refresh = false) {
   const t = S.byId.get(id); if (!t) return;
   const has = S.besitz.has(id);
   if (t.markierung) { delete t.markierung; DB.put('tonies', t); renderTabs(); }
-  const preis = t.preis != null ? `${t.preis.toFixed(2).replace('.', ',')} €` : 'unbekannt';
   const hinw = (t.hinweise || []).map(h => `<div class="note">${esc(h)}</div>`).join('');
+  const zeile = (k, v) => v ? `<div class="row"><span>${k}</span><span>${v}</span></div>` : '';
+  const markt = t.marktpreis != null && t.marktpreis !== '' ? `${eur(t.marktpreis)}${t.marktpreis_quelle || t.marktpreis_datum ? ` <small>(${esc([t.marktpreis_quelle, t.marktpreis_datum && t.marktpreis_datum.split('-').reverse().join('.')].filter(Boolean).join(', '))})</small>` : ''}` : '';
+  const datum = d => d ? d.split('-').reverse().join('.') : '';
+  const prot = (t.protokoll || []).slice(0, 6).map(p => `<li><small>${esc(datum(p.datum))}</small> ${esc(p.text)}</li>`).join('');
+  const q = encodeURIComponent(t.titel);
+  const links = [t.seite ? `<a href="${esc(t.seite)}" target="_blank" rel="noopener">tonies.com</a>` : '',
+    t.club_seite ? `<a href="${esc(t.club_seite)}" target="_blank" rel="noopener">tonies.club</a>` : '',
+    `<a href="https://toytales.eu/wiki?suche=${q}" target="_blank" rel="noopener">ToyTales nachschlagen</a>`].filter(Boolean).join(' · ');
   $('#sheet').innerHTML =
     `<div class="big"><img alt="" src="${imgSrc(t)}">${t.status === 'raritaet' ? '<span class="pill">Rarität</span>' : t.status === 'letzte_chance' ? '<span class="pill bald">Bald Rarität</span>' : ''}</div>` +
     `<h2>${esc(t.titel)}</h2><p class="sub">${esc(t.serie || '')}</p>` +
     `<button class="ownbtn ${has ? 'on' : ''}" data-own="${esc(id)}">${has ? '✓ Im Besitz' : 'Als „Im Besitz“ markieren'}</button>` +
     hinw +
     `<div class="rows">` +
-    `<div class="row"><span>Status</span><span>${STATUS[t.status] || esc(t.status)}</span></div>` +
-    `<div class="row"><span>Originalpreis</span><span>${preis}</span></div>` +
-    `<div class="row"><span>Art</span><span>${esc(t.gruppe || '–')}</span></div>` +
-    `<div class="row"><span>Quelle</span><span>${QUELLE[t.quelle] || esc(t.quelle || '')}</span></div></div>` +
+    zeile('Status', STATUS[t.status] || esc(t.status)) +
+    zeile('Originalpreis', eur(t.preis) || 'unbekannt') +
+    zeile('Marktpreis', markt) +
+    zeile('Art', esc(t.gruppe || '–')) +
+    zeile('Erschienen', esc(datum(t.launch))) +
+    zeile('Alter / Dauer', esc([t.alter && (/^\d+$/.test(t.alter) ? `ab ${t.alter} J.` : t.alter), t.laufzeit && /\d/.test(t.laufzeit) ? `${t.laufzeit} min` : ''].filter(Boolean).join(' · '))) +
+    zeile('EAN', esc(t.ean)) +
+    zeile('Quelle', (QUELLE[t.quelle] || esc(t.quelle || '')) + (t.quellen && t.quellen.length ? `<br><small>${esc(t.quellen.join(', '))}</small>` : '')) + `</div>` +
+    (t.notiz ? `<div class="mynote">${esc(t.notiz).replace(/\n/g, '<br>')}</div>` : '') +
+    `<p class="links">${links}</p>` +
+    (prot ? `<details class="prot"><summary>Änderungen (${t.protokoll.length})</summary><ul>${prot}</ul></details>` : '') +
     `<div class="btnrow"><button class="btn" data-sheet="photo">${t.bild ? 'Bild ändern' : 'Bild hinzufügen'}</button>` +
+    `<button class="btn" data-sheet="own">Notiz / Marktpreis</button>` +
+    `<button class="btn" data-sheet="merge">Mit anderem verbinden …</button>` +
     (t.quelle === 'manuell' ? `<button class="btn" data-sheet="edit">Bearbeiten</button><button class="btn danger" data-sheet="delete">Löschen</button>` : '') +
     `<button class="btn solid" data-sheet="close">Schließen</button></div>`;
   $('#sheet').dataset.id = id;
@@ -265,39 +282,63 @@ async function deleteTonie(id) {
 }
 
 /* ---------- Import / Export ---------- */
+const FELD_NAME = {serie: 'Serie', titel: 'Titel', status: 'Status', gruppe: 'Art', preis: 'Originalpreis'};
+const EXTRA = ['ean', 'launch', 'alter', 'laufzeit', 'club_seite'];
+const EIGEN = ['notiz', 'marktpreis', 'marktpreis_quelle', 'marktpreis_datum'];
+const fmtVal = (k, v) => v == null || v === '' ? '–' : k === 'preis' ? eur(v) : k === 'status' ? (STATUS[v] || v) : v;
+const heute = () => new Date().toISOString().slice(0, 10);
+function logChange(t, text) { t.protokoll = [{datum: heute(), text}, ...(t.protokoll || [])].slice(0, 20); }
+const sauber = (t, hw) => (t.ersetzt && t.ersetzt.length ? hw.filter(h => !/Duplikat|^Nur in /.test(h)) : hw);
+
 async function importCatalog(data) {
   if (!data || data.format !== 'tonies-katalog' || !Array.isArray(data.tonies)) throw new Error('Das ist keine Tonies-Katalogdatei.');
   const first = S.tonies.length === 0;
-  let neu = 0, geaendert = 0, gleich = 0;
+  let neu = 0, geaendert = 0, gleich = 0, uebersprungen = 0;
   const out = [];
   for (const e of data.tonies) {
     if (!e.id || !e.titel) continue;
+    if (S.alias.has(e.id)) { uebersprungen++; continue; }       // vom Nutzer mit einem anderen Eintrag verbunden
     const bild = e.bild_daten ? await dataUrlToBlob(e.bild_daten) : null;
     let t = S.byId.get(e.id);
     if (!t) {
       t = {id: e.id, serie: e.serie || '', titel: e.titel, status: e.status, gruppe: e.gruppe || '', preis: e.preis ?? null, seite: e.seite || null,
-           quelle: e.quelle || 'shop', hinweise: e.hinweise || [], bild, bildManuell: !!e.bildManuell || e.quelle === 'manuell'};
+           quelle: e.quelle || 'shop', hinweise: e.hinweise || [], bild, bildManuell: !!e.bildManuell || e.quelle === 'manuell', quellen: e.quellen || [],
+           ersetzt: e.ersetzt || []};
+      EXTRA.forEach(k => { if (e[k]) t[k] = e[k]; });
+      EIGEN.forEach(k => { if (e[k] != null && e[k] !== '') t[k] = e[k]; });
       if (!first) t.markierung = (t.hinweise.length ? 'pruefen' : 'neu');
       neu++;
     } else {
-      const alt = JSON.stringify([t.serie, t.titel, t.status, t.gruppe, t.preis, t.hinweise]);
+      const alt = JSON.stringify([t.serie, t.titel, t.status, t.gruppe, t.preis, t.hinweise, t.ean, t.quellen]);
+      const hw = sauber(t, e.hinweise || []);
+      const catalogWins = t.quelle !== 'manuell' || e.quelle === 'manuell';
+      const nv = {serie: e.serie || '', titel: e.titel, status: e.status, gruppe: e.gruppe || t.gruppe, preis: e.preis ?? t.preis};
+      // echte Änderungen (alter Wert war gesetzt) ins Protokoll; bloßes Auffüllen leerer Felder nicht
+      const diffs = catalogWins ? Object.keys(FELD_NAME).filter(k => nv[k] !== t[k] && t[k] != null && t[k] !== '') : [];
       if (t.status !== e.status && t.quelle !== 'manuell') t.markierung = 'status';
-      else if ((e.hinweise || []).length && JSON.stringify(e.hinweise) !== JSON.stringify(t.hinweise)) t.markierung = 'pruefen';
-      if (t.quelle !== 'manuell' || e.quelle === 'manuell') {
-        Object.assign(t, {serie: e.serie || '', titel: e.titel, status: e.status, gruppe: e.gruppe || t.gruppe, preis: e.preis ?? t.preis, seite: e.seite || t.seite, hinweise: e.hinweise || []});
+      else if (hw.length && JSON.stringify(hw) !== JSON.stringify(t.hinweise)) t.markierung = 'pruefen';
+      else if (diffs.length && !first) t.markierung = 'geaendert';
+      if (catalogWins) {
+        if (!first) diffs.forEach(k => logChange(t, `${FELD_NAME[k]}: ${fmtVal(k, t[k])} → ${fmtVal(k, nv[k])}`));
+        Object.assign(t, nv, {seite: e.seite || t.seite, hinweise: hw});
+        EXTRA.forEach(k => { if (e[k]) t[k] = e[k]; });
+        if (e.quellen) t.quellen = e.quellen;
       }
+      EIGEN.forEach(k => { if (e[k] != null && e[k] !== '' && (t[k] == null || t[k] === '')) t[k] = e[k]; });
+      if (e.ersetzt && e.ersetzt.length) t.ersetzt = [...new Set([...(t.ersetzt || []), ...e.ersetzt])];
       const gleichesBild = !bild || (t.bild instanceof Blob && t.bild.size === bild.size);
       if (!gleichesBild && (!t.bildManuell || e.bildManuell)) { t.bild = bild; if (e.bildManuell) t.bildManuell = true; }
-      alt === JSON.stringify([t.serie, t.titel, t.status, t.gruppe, t.preis, t.hinweise]) && gleichesBild ? gleich++ : geaendert++;
+      alt === JSON.stringify([t.serie, t.titel, t.status, t.gruppe, t.preis, t.hinweise, t.ean, t.quellen]) && gleichesBild ? gleich++ : geaendert++;
     }
     prep(t); out.push(t);
   }
   await DB.putMany('tonies', out);
-  out.forEach(t => { if (!S.byId.has(t.id)) S.tonies.push(t); S.byId.set(t.id, t); });
+  out.forEach(t => { if (!S.byId.has(t.id)) S.tonies.push(t); S.byId.set(t.id, t); (t.ersetzt || []).forEach(i => S.alias.set(i, t.id)); });
+  const verbunden = await applyAliases();
   if (data.stand) save('stand', data.stand);
   if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
   render();
-  toast(`Eingelesen: ${neu} neu, ${geaendert} geändert, ${gleich} unverändert`, 5000);
+  toast(`Eingelesen: ${neu} neu, ${geaendert} geändert, ${gleich} unverändert` + (verbunden ? `, ${verbunden} verbunden` : ''), 5000);
 }
 async function importFile(file) {
   try { await importCatalog(JSON.parse(await file.text())); }
@@ -326,7 +367,9 @@ async function exportLibrary() {
   const tonies = [];
   for (const t of S.tonies) {
     tonies.push({id: t.id, serie: t.serie, titel: t.titel, status: t.status, gruppe: t.gruppe, preis: t.preis, seite: t.seite, quelle: t.quelle,
-                 hinweise: t.hinweise || [], bildManuell: !!t.bildManuell, bild_daten: t.bild instanceof Blob ? await blobToDataUrl(t.bild) : null});
+                 hinweise: t.hinweise || [], bildManuell: !!t.bildManuell,
+                 ean: t.ean, launch: t.launch, alter: t.alter, laufzeit: t.laufzeit, club_seite: t.club_seite, quellen: t.quellen, ersetzt: t.ersetzt,
+                 notiz: t.notiz, marktpreis: t.marktpreis, marktpreis_quelle: t.marktpreis_quelle, marktpreis_datum: t.marktpreis_datum, bild_daten: t.bild instanceof Blob ? await blobToDataUrl(t.bild) : null});
   }
   const d = new Date().toISOString().slice(0, 10);
   try {
@@ -345,7 +388,7 @@ async function importOwn(file) {
   try {
     const d = JSON.parse(await file.text());
     if (d.format !== 'tonies-besitz') throw new Error('Das ist keine Besitz-Datei.');
-    const ids = d.ids.filter(id => S.byId.has(id));
+    const ids = [...new Set(d.ids.map(id => S.alias.get(id) || id))].filter(id => S.byId.has(id));
     for (const id of ids) { S.besitz.add(id); await DB.put('besitz', true, id); }
     render(); toast(`${ids.length} Tonies als „Im Besitz“ übernommen` + (ids.length < d.ids.length ? ` (${d.ids.length - ids.length} nicht im Katalog)` : ''), 5000);
   } catch (e) { toast('Fehler: ' + (e.message || e), 6000); }
@@ -353,6 +396,125 @@ async function importOwn(file) {
 async function markAllSeen() {
   const m = S.tonies.filter(t => t.markierung); m.forEach(t => delete t.markierung);
   await DB.putMany('tonies', m); render(); toast(m.length ? `${m.length} als gesehen markiert` : 'Keine Neuheiten offen');
+}
+
+/* ---------- Verbinden (Duplikate zusammenführen) ---------- */
+const RANG = {shop: 4, support: 3, extern: 2, manuell: 1};
+async function absorb(keepId, dropId) {
+  const k = S.byId.get(keepId), d = S.byId.get(dropId);
+  if (!k || !d || k === d) return;
+  for (const f of ['serie', 'gruppe', 'preis', 'seite', 'ean', 'launch', 'alter', 'laufzeit', 'club_seite', 'marktpreis', 'marktpreis_quelle', 'marktpreis_datum'])
+    if ((k[f] == null || k[f] === '') && d[f] != null && d[f] !== '') k[f] = d[f];
+  if (!(k.bild instanceof Blob) && d.bild instanceof Blob) { k.bild = d.bild; k.bildManuell = d.bildManuell; }
+  if (d.notiz && d.notiz !== k.notiz) k.notiz = k.notiz ? k.notiz + '\n' + d.notiz : d.notiz;
+  k.quellen = [...new Set([...(k.quellen || []), ...(d.quellen || [])])];
+  k.ersetzt = [...new Set([...(k.ersetzt || []), dropId, ...(d.ersetzt || [])])];
+  k.hinweise = (k.hinweise || []).filter(h => !/Duplikat|^Nur in /.test(h));
+  if (k.markierung === 'pruefen' && !k.hinweise.length) delete k.markierung;
+  logChange(k, `Verbunden mit „${label(d)}“`);
+  if (S.besitz.has(dropId)) { S.besitz.add(keepId); await DB.put('besitz', true, keepId); }
+  await DB.del('besitz', dropId); S.besitz.delete(dropId);
+  await DB.del('tonies', dropId); S.byId.delete(dropId); S.tonies = S.tonies.filter(x => x !== d);
+  const c = S.urls.get(dropId); if (c) { URL.revokeObjectURL(c.url); S.urls.delete(dropId); }
+  S.alias.set(dropId, keepId); (d.ersetzt || []).forEach(i => S.alias.set(i, keepId));
+  prep(k); await DB.put('tonies', k);
+}
+async function applyAliases() {   // Verbindungen aus einem importierten Katalog/einer anderen Bibliothek lokal nachvollziehen
+  let n = 0;
+  for (const t of [...S.tonies]) {
+    if (S.byId.get(t.id) !== t) continue;
+    for (const id of t.ersetzt || []) if (id !== t.id && S.byId.has(id)) { await absorb(t.id, id); n++; }
+  }
+  return n;
+}
+const bigr = s => { const b = new Set(); for (let i = 0; i < s.length - 1; i++) b.add(s.slice(i, i + 2)); return b; };
+function dice(a, b) { if (!a.size || !b.size) return 0; let n = 0; for (const x of a) if (b.has(x)) n++; return 2 * n / (a.size + b.size); }
+const ziffern = t => (label(t).match(/\d+/g) || []).join(',');
+function keepFirst(a, b) {   // Standard: der „offiziellere“ Eintrag bleibt
+  const ra = (RANG[a.quelle] || 0) * 2 + (a.bild instanceof Blob ? 1 : 0), rb = (RANG[b.quelle] || 0) * 2 + (b.bild instanceof Blob ? 1 : 0);
+  return ra >= rb ? [a, b] : [b, a];
+}
+function findDupes() {
+  const ign = new Set(load('dupIgnore', []));
+  const buckets = new Map(), bg = new Map();
+  for (const t of S.tonies) {
+    bg.set(t.id, bigr(t.key.replace(/ /g, '')));
+    for (const w of new Set(norm(label(t)).split(' ').filter(x => x.length >= 5))) { if (!buckets.has(w)) buckets.set(w, []); buckets.get(w).push(t); }
+  }
+  const seen = new Set(), pairs = [];
+  for (const arr of buckets.values()) {
+    if (arr.length > 90) continue;
+    for (let i = 0; i < arr.length; i++) for (let j = i + 1; j < arr.length; j++) {
+      const a = arr[i], b = arr[j], key = [a.id, b.id].sort().join('|');
+      if (seen.has(key) || ign.has(key)) continue; seen.add(key);
+      let sc = 0;
+      if (a.ean && a.ean === b.ean) sc = 1;
+      else if (a.key === b.key) sc = 0.99;
+      else if (ziffern(a) === ziffern(b) && (a.quelle === 'extern' || b.quelle === 'extern' || a.quelle === 'manuell' || b.quelle === 'manuell')) {
+        const d = dice(bg.get(a.id), bg.get(b.id)); if (d >= 0.85) sc = d;
+      }
+      if (sc) pairs.push({a, b, sc, key});
+    }
+  }
+  return pairs.sort((x, y) => y.sc - x.sc).slice(0, 150);
+}
+const M = {mode: 'dupes', id: null, q: '', pair: null};
+function pairHtml(a, b, key) {
+  const side = (t, cap) => `<div class="pc"><img alt="" src="${imgSrc(t)}"><b>${cap}</b><span>${esc(label(t))}</span><small>${QUELLE[t.quelle] || ''}${S.besitz.has(t.id) ? ' · im Besitz' : ''}</small></div>`;
+  return `<div class="pair" data-a="${esc(a.id)}" data-b="${esc(b.id)}" data-key="${esc(key || '')}"><div class="pcols">${side(a, 'Bleibt')}${side(b, 'Geht auf in Bleibt')}</div>` +
+    `<div class="btnrow"><button class="btn solid" data-m="do">Verbinden</button><button class="btn" data-m="swap">Tauschen</button>` +
+    (key ? `<button class="btn" data-m="no">Kein Duplikat</button>` : `<button class="btn" data-m="back">Zurück</button>`) + `</div></div>`;
+}
+function renderMerge() {
+  const body = $('#mergeBody');
+  if (M.pair) { const [a, b] = M.pair; body.innerHTML = pairHtml(a, b, ''); return; }
+  if (M.mode === 'dupes') {
+    const p = findDupes();
+    body.innerHTML = `<h2>Doppelte Einträge</h2><p class="muted">Besitz, Notizen und Bild werden übernommen. ${p.length ? p.length + ' Vorschläge:' : 'Keine Vorschläge gefunden.'}</p>` +
+      p.map(x => { const [a, b] = keepFirst(x.a, x.b); return pairHtml(a, b, x.key); }).join('');
+    return;
+  }
+  const t = S.byId.get(M.id), q = norm(M.q);
+  const bt = bigr(t.key.replace(/ /g, ''));
+  let l = S.tonies.filter(x => x !== t);
+  l = q ? l.filter(x => q.split(' ').every(w => x.key.includes(w))) : l.map(x => ({x, d: dice(bt, bigr(x.key.replace(/ /g, '')))})).sort((u, v) => v.d - u.d).slice(0, 12).map(o => o.x);
+  body.innerHTML = `<h2>Verbinden: ${esc(label(t))}</h2><input id="mergeQ" type="search" placeholder="Anderen Eintrag suchen …" value="${esc(M.q)}" autocomplete="off">` +
+    `<div class="mlist">${l.slice(0, 40).map(x => `<button class="mrow" data-pick="${esc(x.id)}"><img alt="" src="${imgSrc(x)}"><span>${esc(label(x))}<small>${QUELLE[x.quelle] || ''}</small></span></button>`).join('') || '<p class="muted">Nichts gefunden.</p>'}</div>`;
+}
+function openMerge(mode, id) {
+  M.mode = mode; M.id = id || null; M.q = ''; M.pair = null;
+  renderMerge();
+  if (!$('#merge').open) { $('#merge').showModal(); pushOverlay('merge', () => { if ($('#merge').open) $('#merge').close(); }); }
+}
+async function mergeClick(e) {
+  const pick = e.target.closest('[data-pick]');
+  if (pick) { M.pair = keepFirst(S.byId.get(M.id), S.byId.get(pick.dataset.pick)); return renderMerge(); }
+  const b = e.target.closest('[data-m]'); if (!b) return;
+  const pr = b.closest('.pair'); const a = S.byId.get(pr.dataset.a), c = S.byId.get(pr.dataset.b);
+  if (b.dataset.m === 'swap') { if (M.pair) M.pair = [c, a]; else { pr.dataset.a = c.id; pr.dataset.b = a.id; pr.outerHTML = pairHtml(c, a, pr.dataset.key); } return M.pair ? renderMerge() : undefined; }
+  if (b.dataset.m === 'back') { M.pair = null; return renderMerge(); }
+  if (b.dataset.m === 'no') { const ig = load('dupIgnore', []); ig.push(pr.dataset.key); save('dupIgnore', ig); return renderMerge(); }
+  if (b.dataset.m === 'do') {
+    await absorb(a.id, c.id); render(); toast('Verbunden');
+    if (!$('#sheetWrap').hidden) { const cur = $('#sheet').dataset.id; if (S.byId.has(cur)) openSheet(cur, true); else closeSheet(); }
+    if (M.mode === 'pick') { closeMerge(); } else renderMerge();
+  }
+}
+function closeMerge() { if ($('#merge').open) closeOverlay('merge'); }
+
+/* ---------- Eigene Angaben (Notiz, Marktpreis) ---------- */
+function openOwn(id) {
+  const t = S.byId.get(id), f = $('#ownEl'); f.reset(); f.dataset.id = id;
+  f.notiz.value = t.notiz || ''; f.marktpreis.value = t.marktpreis ?? ''; f.quelle.value = t.marktpreis_quelle || '';
+  $('#own').showModal();
+}
+async function submitOwn(ev) {
+  ev.preventDefault();
+  const f = $('#ownEl'), t = S.byId.get(f.dataset.id); if (!t) return;
+  const mp = f.marktpreis.value === '' ? null : parseFloat(f.marktpreis.value);
+  if (mp !== (t.marktpreis ?? null) || f.quelle.value.trim() !== (t.marktpreis_quelle || '')) t.marktpreis_datum = mp == null ? '' : heute();
+  Object.assign(t, {notiz: f.notiz.value.trim(), marktpreis: mp, marktpreis_quelle: f.quelle.value.trim()});
+  await DB.put('tonies', t); $('#own').close(); openSheet(t.id, true); toast('Gespeichert');
 }
 
 /* ---------- Darstellung ---------- */
@@ -377,6 +539,7 @@ function act(name) {
   else if (name === 'server') { closeSide(); loadFromServer(); }
   else if (name === 'export') { closeSide(); exportLibrary(); }
   else if (name === 'seen') { closeSide(); markAllSeen(); }
+  else if (name === 'dupes') { closeSide(); setTimeout(() => openMerge('dupes'), 30); }
   else if (name === 'ownexport') { closeSide(); exportOwn(); }
   else if (name === 'ownimport') { closeSide(); $('#fileOwn').click(); }
 }
@@ -408,11 +571,19 @@ function bind() {
     else if (s.dataset.sheet === 'photo') { $('#filePhoto').dataset.id = id; $('#filePhoto').click(); }
     else if (s.dataset.sheet === 'edit') { const t = S.byId.get(id); closeSheet(); setTimeout(() => openForm(t), 30); }
     else if (s.dataset.sheet === 'delete') deleteTonie(id);
+    else if (s.dataset.sheet === 'own') openOwn(id);
+    else if (s.dataset.sheet === 'merge') openMerge('pick', id);
   });
   $('#filePhoto').addEventListener('change', e => { const f = e.target.files[0]; if (f) setPhoto(e.target.dataset.id, f); e.target.value = ''; });
   $('#fileCatalog').addEventListener('change', e => { const f = e.target.files[0]; if (f) importFile(f); e.target.value = ''; });
   $('#fileOwn').addEventListener('change', e => { const f = e.target.files[0]; if (f) importOwn(f); e.target.value = ''; });
   $('#formEl').addEventListener('submit', submitForm);
+  $('#ownEl').addEventListener('submit', submitOwn);
+  $('#ownCancel').addEventListener('click', () => $('#own').close());
+  $('#merge').addEventListener('click', mergeClick);
+  $('#merge').addEventListener('input', e => { if (e.target.id === 'mergeQ') { M.q = e.target.value; const pos = e.target.selectionStart; renderMerge(); const i = $('#mergeQ'); i.focus(); i.setSelectionRange(pos, pos); } });
+  $('#mergeClose').addEventListener('click', closeMerge);
+  $('#merge').addEventListener('cancel', ev => { ev.preventDefault(); closeMerge(); });
   $('#formCancel').addEventListener('click', () => $('#form').close());
   window.addEventListener('resize', sizeHeader);
 }
@@ -427,7 +598,7 @@ function bind() {
   try {
     await DB.open();
     S.tonies = (await DB.all('tonies')).map(prep);
-    S.tonies.forEach(t => S.byId.set(t.id, t));
+    S.tonies.forEach(t => { S.byId.set(t.id, t); (t.ersetzt || []).forEach(i => S.alias.set(i, t.id)); });
     (await DB.keys('besitz')).forEach(k => S.besitz.add(k));
   } catch (e) { toast('Lokaler Speicher nicht verfügbar: ' + e.message, 8000); }
   render(); sizeHeader();
